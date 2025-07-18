@@ -41,12 +41,12 @@ export async function GET(request: NextRequest) {
       response: result.substring(0, 200)
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('API 测试错误:', error);
     return NextResponse.json({ 
       success: false, 
-      error: error.message,
-      details: error.toString()
+      error: error instanceof Error ? error.message : 'Unknown error',
+      details: error instanceof Error ? error.toString() : String(error)
     }, { status: 500 });
   }
 }

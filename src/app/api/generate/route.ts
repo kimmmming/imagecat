@@ -67,7 +67,9 @@ export async function POST(request: NextRequest) {
       
       // 确保生成目录存在
       try {
-        const imageBuffer = Buffer.from(await generatedImage.arrayBuffer());
+        const imageBuffer = generatedImage instanceof Blob 
+          ? Buffer.from(await generatedImage.arrayBuffer())
+          : Buffer.from(generatedImage);
         console.log('图片buffer大小:', imageBuffer.length, 'bytes');
         await writeFile(generatedPath, imageBuffer);
         console.log('图片保存成功:', generatedPath);
@@ -75,7 +77,9 @@ export async function POST(request: NextRequest) {
         console.log('目录不存在，创建目录...');
         const { mkdir } = await import('fs/promises');
         await mkdir(join(process.cwd(), 'public', 'generated'), { recursive: true });
-        const imageBuffer = Buffer.from(await generatedImage.arrayBuffer());
+        const imageBuffer = generatedImage instanceof Blob 
+          ? Buffer.from(await generatedImage.arrayBuffer())
+          : Buffer.from(generatedImage);
         await writeFile(generatedPath, imageBuffer);
         console.log('图片保存成功 (新建目录):', generatedPath);
       }

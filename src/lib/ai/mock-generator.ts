@@ -4,7 +4,7 @@ export async function generateMockCartoonAvatar(imageBuffer: Buffer, style: stri
   await new Promise(resolve => setTimeout(resolve, 2000));
   
   // 使用Sharp创建一个简单的占位符图片
-  const sharp = require('sharp');
+  const sharp = (await import('sharp')).default;
   
   try {
     // 创建一个400x400的渐变图片

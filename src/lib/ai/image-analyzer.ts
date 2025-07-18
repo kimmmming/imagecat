@@ -133,7 +133,7 @@ async function estimateFurPattern(image: sharp.Sharp): Promise<'solid' | 'stripe
 }
 
 export function generateFeatureBasedPrompt(features: ImageFeatures, baseStyle: string): string {
-  const colorDescriptions = {
+  const colorDescriptions: Record<string, string> = {
     'black': 'black fur',
     'white': 'white fur',
     'gray': 'gray fur',

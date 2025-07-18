@@ -2,7 +2,7 @@
 
 export async function generateWithFallback(imageBuffer: Buffer, style: string = 'cartoon') {
   // 方案1: 尝试本地图像处理 + AI提示词
-  const sharp = require('sharp');
+  const sharp = (await import('sharp')).default;
   
   try {
     // 处理原图片：调整大小、增加卡通效果
