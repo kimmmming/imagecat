@@ -6,7 +6,7 @@ import { generateCartoonAvatar as generateSiliconCloudAvatar } from '@/lib/ai/si
 import { generateCartoonAvatar as generateHuggingFaceAvatar } from '@/lib/ai/huggingface';
 import { generateMockCartoonAvatar } from '@/lib/ai/mock-generator';
 import { generateWithFallback } from '@/lib/ai/alternative';
-import { db } from '@/lib/db';
+import { db, isDatabaseConnected } from '@/lib/db';
 import { generations } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 
@@ -22,13 +22,17 @@ export async function POST(request: NextRequest) {
     const generationId = uuidv4();
 
     // 在数据库中创建记录（如果数据库可用）
-    if (db) {
-      await db.insert(generations).values({
-        id: generationId,
-        originalImageUrl: imageUrl,
-        style,
-        status: 'processing',
-      });
+    if (isDatabaseConnected()) {
+      try {
+        await db!.insert(generations).values({
+          id: generationId,
+          originalImageUrl: imageUrl,
+          style,
+          status: 'processing',
+        });
+      } catch (dbError) {
+        console.warn('数据库写入失败，继续处理:', dbError);
+      }
     }
 
     try {
@@ -87,14 +91,18 @@ export async function POST(request: NextRequest) {
       const generatedUrl = `/generated/${generatedFilename}`;
 
       // 更新数据库记录（如果数据库可用）
-      if (db) {
-        await db.update(generations)
-          .set({
-            generatedImageUrl: generatedUrl,
-            status: 'completed',
-            updatedAt: new Date(),
-          })
-          .where(eq(generations.id, generationId));
+      if (isDatabaseConnected()) {
+        try {
+          await db!.update(generations)
+            .set({
+              generatedImageUrl: generatedUrl,
+              status: 'completed',
+              updatedAt: new Date(),
+            })
+            .where(eq(generations.id, generationId));
+        } catch (dbError) {
+          console.warn('数据库更新失败:', dbError);
+        }
       }
 
       return NextResponse.json({
