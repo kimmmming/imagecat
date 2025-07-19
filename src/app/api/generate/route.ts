@@ -70,45 +70,40 @@ export async function POST(request: NextRequest) {
       const generatedFilename = `generated_${generationId}.png`;
       const isVercel = process.env.VERCEL === '1';
       
-      // 在Vercel环境使用临时目录，本地开发使用public目录
+      // 在Vercel环境直接返回base64，本地开发使用public目录
       const generatedPath = isVercel 
-        ? join('/tmp', generatedFilename)
+        ? null // Vercel环境不保存文件
         : join(process.cwd(), 'public', 'generated', generatedFilename);
       
       console.log('准备保存图片到:', generatedPath);
       
-      // 确保生成目录存在
-      try {
-        const imageBuffer = generatedImage instanceof Blob 
-          ? Buffer.from(await generatedImage.arrayBuffer())
-          : Buffer.from(generatedImage);
-        console.log('图片buffer大小:', imageBuffer.length, 'bytes');
-        
-        if (!isVercel) {
-          // 本地环境需要确保目录存在
-          await writeFile(generatedPath, imageBuffer);
+      // 处理图片保存和URL生成
+      const finalImageBuffer = generatedImage instanceof Blob 
+        ? Buffer.from(await generatedImage.arrayBuffer())
+        : Buffer.from(generatedImage);
+              console.log('图片buffer大小:', finalImageBuffer.length, 'bytes');
+      
+      let generatedUrl;
+      
+              if (isVercel) {
+          // Vercel环境直接返回base64数据URL
+          const base64 = finalImageBuffer.toString('base64');
+          generatedUrl = `data:image/png;base64,${base64}`;
+          console.log('Vercel环境：使用base64数据URL');
         } else {
-          // Vercel环境直接写入临时文件
-          await writeFile(generatedPath, imageBuffer);
+          // 本地环境保存到文件系统
+          try {
+            await writeFile(generatedPath!, finalImageBuffer);
+            console.log('图片保存成功:', generatedPath);
+          } catch (error) {
+            console.log('目录不存在，创建目录...');
+            const { mkdir } = await import('fs/promises');
+            await mkdir(join(process.cwd(), 'public', 'generated'), { recursive: true });
+            await writeFile(generatedPath!, finalImageBuffer);
+            console.log('图片保存成功 (新建目录):', generatedPath);
+          }
+          generatedUrl = `/generated/${generatedFilename}`;
         }
-        console.log('图片保存成功:', generatedPath);
-      } catch (error) {
-        if (!isVercel) {
-          console.log('目录不存在，创建目录...');
-          const { mkdir } = await import('fs/promises');
-          await mkdir(join(process.cwd(), 'public', 'generated'), { recursive: true });
-          const imageBuffer = generatedImage instanceof Blob 
-            ? Buffer.from(await generatedImage.arrayBuffer())
-            : Buffer.from(generatedImage);
-          await writeFile(generatedPath, imageBuffer);
-          console.log('图片保存成功 (新建目录):', generatedPath);
-        } else {
-          throw error;
-        }
-      }
-
-      // 返回适当的URL
-      const generatedUrl = isVercel ? generatedPath : `/generated/${generatedFilename}`;
 
       // 更新数据库记录（如果数据库可用）
       if (isDatabaseConnected()) {
@@ -137,17 +132,22 @@ export async function POST(request: NextRequest) {
       console.error('AI生成错误:', aiError);
       
       // 更新数据库记录为失败状态（如果数据库可用）
-      if (db) {
-        await db.update(generations)
-          .set({
-            status: 'failed',
-            updatedAt: new Date(),
-          })
-          .where(eq(generations.id, generationId));
+      if (isDatabaseConnected()) {
+        try {
+          await db!.update(generations)
+            .set({
+              status: 'failed',
+              updatedAt: new Date(),
+            })
+            .where(eq(generations.id, generationId));
+        } catch (dbError) {
+          console.warn('数据库更新失败:', dbError);
+        }
       }
 
       return NextResponse.json({ 
         error: '图片生成失败，请稍后重试',
+        details: process.env.NODE_ENV === 'development' ? String(aiError) : undefined,
         id: generationId 
       }, { status: 500 });
     }
