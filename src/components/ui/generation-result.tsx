@@ -26,7 +26,10 @@ export function GenerationResult({
           <h3 className="text-lg font-semibold text-center">原图</h3>
           <div className="relative">
             <img 
-              src={originalUrl} 
+              src={originalUrl.startsWith('/') && originalUrl.includes('tmp') 
+                ? `/api/serve-image?path=${encodeURIComponent(originalUrl)}`
+                : originalUrl
+              } 
               alt="原始猫咪照片" 
               className="w-full h-64 object-cover rounded-lg border-2 border-gray-200"
             />
@@ -49,7 +52,10 @@ export function GenerationResult({
               </div>
             ) : generatedUrl ? (
               <img 
-                src={generatedUrl} 
+                src={generatedUrl.startsWith('/') && generatedUrl.includes('tmp') 
+                  ? `/api/serve-image?path=${encodeURIComponent(generatedUrl)}`
+                  : generatedUrl
+                } 
                 alt="生成的卡通头像" 
                 className="w-full h-64 object-cover rounded-lg border-2 border-gray-200"
               />
