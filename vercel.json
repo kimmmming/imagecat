@@ -6,9 +6,5 @@
     "src/app/api/upload/route.ts": {
       "maxDuration": 30
     }
-  },
-  "outputFileTracingExcludes": {
-    "**/node_modules/@swc/core-linux-x64-gnu/**/*": true,
-    "**/node_modules/@swc/core-linux-x64-musl/**/*": true
   }
 }
