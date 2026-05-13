@@ -1,106 +1,117 @@
 'use client';
 
-import { useState } from 'react';
-import { Download, RefreshCw, Heart } from 'lucide-react';
+import { Download, RefreshCw, RotateCcw } from 'lucide-react';
+import type { Copy } from '@/lib/i18n';
 
 interface GenerationResultProps {
+  copy: Copy;
   originalUrl: string;
   generatedUrl?: string;
   isGenerating: boolean;
+  canGenerate: boolean;
   onRegenerate: () => void;
   onDownload: () => void;
+  onReset: () => void;
 }
 
-export function GenerationResult({ 
-  originalUrl, 
-  generatedUrl, 
-  isGenerating, 
-  onRegenerate, 
-  onDownload 
+function resolveImageUrl(url: string) {
+  if (url.startsWith('/') && url.includes('tmp')) {
+    return `/api/serve-image?path=${encodeURIComponent(url)}`;
+  }
+
+  return url;
+}
+
+export function GenerationResult({
+  copy,
+  originalUrl,
+  generatedUrl,
+  isGenerating,
+  canGenerate,
+  onRegenerate,
+  onDownload,
+  onReset,
 }: GenerationResultProps) {
   return (
-    <div className="w-full max-w-4xl mx-auto">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {/* 原图 */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-center">原图</h3>
-          <div className="relative">
-            <img 
-              src={originalUrl.startsWith('/') && originalUrl.includes('tmp') 
-                ? `/api/serve-image?path=${encodeURIComponent(originalUrl)}`
-                : originalUrl
-              } 
-              alt="原始猫咪照片" 
-              className="w-full h-64 object-cover rounded-lg border-2 border-gray-200"
-            />
-          </div>
-        </div>
+    <div className="flex min-h-[620px] flex-col">
+      <div className="grid flex-1 gap-4 lg:grid-cols-2">
+        <ImagePane title={copy.original} imageUrl={resolveImageUrl(originalUrl)} alt="Uploaded pet photo" />
 
-        {/* 生成结果 */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-center">
-            卡通头像 {isGenerating && <span className="text-blue-500">(生成中...)</span>}
-          </h3>
-          <div className="relative">
+        <div className="flex min-h-[420px] flex-col rounded-lg border border-[#ded8cd] bg-[#fbfaf7]">
+          <div className="flex items-center justify-between border-b border-[#e6dfd4] px-4 py-3">
+            <h3 className="font-medium text-[#1f2320]">{copy.resultTitle}</h3>
+            <span className="rounded-lg bg-[#eff7f4] px-2 py-1 text-xs text-[#1f6f64]">
+              {generatedUrl ? copy.ready : isGenerating ? copy.generating : copy.waiting}
+            </span>
+          </div>
+
+          <div className="grid flex-1 place-items-center p-4">
             {isGenerating ? (
-              <div className="w-full h-64 bg-gray-100 rounded-lg border-2 border-gray-200 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                  <p className="text-gray-600">AI正在生成你的卡通头像...</p>
-                  <p className="text-sm text-gray-500 mt-2">这可能需要30-60秒</p>
-                </div>
+              <div className="text-center">
+                <div className="mx-auto mb-5 h-14 w-14 animate-spin rounded-full border-2 border-[#1f6f64] border-t-transparent" />
+                <p className="font-medium text-[#1f2320]">{copy.generatingTitle}</p>
+                <p className="mt-2 text-sm text-[#6f716a]">{copy.generatingHelp}</p>
               </div>
             ) : generatedUrl ? (
-              <img 
-                src={generatedUrl.startsWith('/') && generatedUrl.includes('tmp') 
-                  ? `/api/serve-image?path=${encodeURIComponent(generatedUrl)}`
-                  : generatedUrl
-                } 
-                alt="生成的卡通头像" 
-                className="w-full h-64 object-cover rounded-lg border-2 border-gray-200"
+              <img
+                src={resolveImageUrl(generatedUrl)}
+                alt="Generated pet portrait"
+                className="aspect-square w-full max-w-[440px] rounded-lg object-cover shadow-sm"
               />
             ) : (
-              <div className="w-full h-64 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
-                <p className="text-gray-500">等待生成...</p>
+              <div className="rounded-lg border border-dashed border-[#d8d2c8] px-6 py-8 text-sm text-[#6f716a]">
+                {copy.waitingResult}
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* 操作按钮 */}
-      {(generatedUrl || isGenerating) && (
-        <div className="flex justify-center gap-4 mt-8">
-          <button
-            onClick={onRegenerate}
-            disabled={isGenerating}
-            className="flex items-center gap-2 px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <RefreshCw size={20} />
-            重新生成
-          </button>
-          
-          {generatedUrl && (
-            <button
-              onClick={onDownload}
-              className="flex items-center gap-2 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-            >
-              <Download size={20} />
-              下载头像
-            </button>
-          )}
-        </div>
-      )}
+      <div className="mt-4 flex flex-wrap justify-end gap-3 border-t border-[#e6dfd4] pt-4">
+        <button
+          onClick={onReset}
+          disabled={isGenerating}
+          className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#d8d2c8] bg-white px-4 text-sm font-medium text-[#42463f] transition-colors hover:bg-[#f7f4ee] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <RotateCcw size={18} />
+          {copy.newPhoto}
+        </button>
 
-      {/* 风格选择器（未来功能） */}
-      {generatedUrl && (
-        <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-          <p className="text-sm text-gray-600 text-center flex items-center justify-center gap-2">
-            <Heart size={16} className="text-red-500" />
-            喜欢这个头像吗？更多风格选择即将推出！
-          </p>
-        </div>
-      )}
+        <button
+          onClick={onRegenerate}
+          disabled={isGenerating || !canGenerate}
+          className="inline-flex h-11 items-center gap-2 rounded-lg border border-[#1f6f64] bg-white px-4 text-sm font-medium text-[#1f6f64] transition-colors hover:bg-[#eff7f4] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <RefreshCw size={18} />
+          {copy.regenerate}
+        </button>
+
+        <button
+          onClick={onDownload}
+          disabled={!generatedUrl || isGenerating}
+          className="inline-flex h-11 items-center gap-2 rounded-lg bg-[#1f6f64] px-5 text-sm font-medium text-white transition-colors hover:bg-[#18584f] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Download size={18} />
+          {copy.download}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ImagePane({ title, imageUrl, alt }: { title: string; imageUrl: string; alt: string }) {
+  return (
+    <div className="flex min-h-[420px] flex-col rounded-lg border border-[#ded8cd] bg-[#fbfaf7]">
+      <div className="border-b border-[#e6dfd4] px-4 py-3">
+        <h3 className="font-medium text-[#1f2320]">{title}</h3>
+      </div>
+      <div className="grid flex-1 place-items-center p-4">
+        <img
+          src={imageUrl}
+          alt={alt}
+          className="aspect-square w-full max-w-[440px] rounded-lg object-cover shadow-sm"
+        />
+      </div>
     </div>
   );
 }

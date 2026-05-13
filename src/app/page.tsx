@@ -1,43 +1,120 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { MessageCircle, Sparkles } from 'lucide-react';
+import {
+  FREE_CREDIT_LIMIT,
+  FREE_CREDITS_KEY,
+  LOCALE_KEY,
+  PAID_CREDITS_KEY,
+  REDEEMED_CODES_KEY,
+  clampCreditValue,
+} from '@/lib/credits';
+import { copy, type Locale } from '@/lib/i18n';
 import { UploadZone } from '@/components/ui/upload-zone';
 import { GenerationResult } from '@/components/ui/generation-result';
 
+type Stage = 'upload' | 'generating' | 'done';
+
 export default function Home() {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadedImageUrl, setUploadedImageUrl] = useState<string>('');
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string>('');
+  const [locale, setLocale] = useState<Locale>('en');
+  const [freeCreditsUsed, setFreeCreditsUsed] = useState(0);
+  const [paidCredits, setPaidCredits] = useState(0);
+  const [redeemedCodes, setRedeemedCodes] = useState<string[]>([]);
+  const [redeemCode, setRedeemCode] = useState('');
+  const [redeemMessage, setRedeemMessage] = useState('');
+  const [isRedeeming, setIsRedeeming] = useState(false);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState('');
+  const [generatedImageUrl, setGeneratedImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generationId, setGenerationId] = useState<string>('');
+  const [generationId, setGenerationId] = useState('');
+
+  const t = copy[locale];
+  const freeCreditsLeft = Math.max(0, FREE_CREDIT_LIMIT - freeCreditsUsed);
+  const totalCredits = freeCreditsLeft + paidCredits;
+  const canGenerate = totalCredits > 0;
+  const stage: Stage = generatedImageUrl ? 'done' : uploadedImageUrl || isGenerating ? 'generating' : 'upload';
+
+  useEffect(() => {
+    const storedLocale = window.localStorage.getItem(LOCALE_KEY);
+    const storedFreeUsed = Number(window.localStorage.getItem(FREE_CREDITS_KEY) || 0);
+    const storedPaidCredits = Number(window.localStorage.getItem(PAID_CREDITS_KEY) || 0);
+    const storedRedeemedCodes = window.localStorage.getItem(REDEEMED_CODES_KEY);
+
+    if (storedLocale === 'zh' || storedLocale === 'en') {
+      setLocale(storedLocale);
+    }
+
+    setFreeCreditsUsed(clampCreditValue(storedFreeUsed));
+    setPaidCredits(clampCreditValue(storedPaidCredits));
+
+    if (storedRedeemedCodes) {
+      try {
+        const parsed = JSON.parse(storedRedeemedCodes);
+        if (Array.isArray(parsed)) {
+          setRedeemedCodes(parsed.filter((item) => typeof item === 'string'));
+        }
+      } catch {
+        setRedeemedCodes([]);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(LOCALE_KEY, locale);
+  }, [locale]);
+
+  const creditSummary = useMemo(
+    () => [
+      { label: t.freeCredits, value: freeCreditsLeft },
+      { label: t.paidCredits, value: paidCredits },
+    ],
+    [freeCreditsLeft, paidCredits, t.freeCredits, t.paidCredits],
+  );
+
+  const consumeCredit = () => {
+    if (freeCreditsLeft > 0) {
+      const nextUsed = freeCreditsUsed + 1;
+      setFreeCreditsUsed(nextUsed);
+      window.localStorage.setItem(FREE_CREDITS_KEY, String(nextUsed));
+      return;
+    }
+
+    const nextPaidCredits = Math.max(0, paidCredits - 1);
+    setPaidCredits(nextPaidCredits);
+    window.localStorage.setItem(PAID_CREDITS_KEY, String(nextPaidCredits));
+  };
 
   const handleFileSelect = async (file: File) => {
-    setSelectedFile(file);
+    if (!canGenerate) {
+      alert(t.noCredits);
+      return;
+    }
+
     setIsUploading(true);
-    
+    setGeneratedImageUrl('');
+
     try {
       const formData = new FormData();
       formData.append('file', file);
-      
+
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
       });
-      
+
       if (!response.ok) {
-        throw new Error('上传失败');
+        const message = await getErrorMessage(response, t.uploadFailed);
+        throw new Error(message);
       }
-      
+
       const result = await response.json();
       setUploadedImageUrl(result.url);
-      
-      // 自动开始生成
-      handleGenerate(result.url);
-      
+      await handleGenerate(result.url);
     } catch (error) {
-      console.error('上传错误:', error);
-      alert('上传失败，请重试');
+      console.error('Upload error:', error);
+      alert(error instanceof Error ? error.message : t.uploadRetry);
     } finally {
       setIsUploading(false);
     }
@@ -46,10 +123,15 @@ export default function Home() {
   const handleGenerate = async (imageUrl?: string) => {
     const urlToUse = imageUrl || uploadedImageUrl;
     if (!urlToUse) return;
-    
+
+    if (!canGenerate) {
+      alert(t.noCredits);
+      return;
+    }
+
     setIsGenerating(true);
     setGeneratedImageUrl('');
-    
+
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -61,97 +143,223 @@ export default function Home() {
           style: 'cartoon',
         }),
       });
-      
+
       if (!response.ok) {
-        throw new Error('生成失败');
+        const message = await getErrorMessage(response, t.generationFailed);
+        throw new Error(message);
       }
-      
+
       const result = await response.json();
       setGenerationId(result.id);
       setGeneratedImageUrl(result.generatedUrl);
-      
+      consumeCredit();
     } catch (error) {
-      console.error('生成错误:', error);
-      alert('生成失败，请重试');
+      console.error('Generation error:', error);
+      alert(error instanceof Error ? error.message : t.generationRetry);
     } finally {
       setIsGenerating(false);
     }
   };
 
+  const handleRedeem = async () => {
+    const normalizedCode = redeemCode.trim().toUpperCase();
+    if (!normalizedCode) return;
+
+    if (redeemedCodes.includes(normalizedCode)) {
+      setRedeemMessage(t.redeemFailed);
+      return;
+    }
+
+    setIsRedeeming(true);
+    setRedeemMessage('');
+
+    try {
+      const response = await fetch('/api/redeem', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: normalizedCode }),
+      });
+
+      if (!response.ok) {
+        const message = await getErrorMessage(response, t.redeemFailed);
+        throw new Error(message);
+      }
+
+      const result = await response.json();
+      const creditsToAdd = clampCreditValue(Number(result.credits));
+      const nextPaidCredits = paidCredits + creditsToAdd;
+      const nextRedeemedCodes = [...redeemedCodes, normalizedCode];
+
+      setPaidCredits(nextPaidCredits);
+      setRedeemedCodes(nextRedeemedCodes);
+      setRedeemCode('');
+      setRedeemMessage(`${t.redeemSuccess} +${creditsToAdd}`);
+      window.localStorage.setItem(PAID_CREDITS_KEY, String(nextPaidCredits));
+      window.localStorage.setItem(REDEEMED_CODES_KEY, JSON.stringify(nextRedeemedCodes));
+    } catch (error) {
+      console.error('Redeem error:', error);
+      setRedeemMessage(error instanceof Error ? error.message : t.redeemFailed);
+    } finally {
+      setIsRedeeming(false);
+    }
+  };
+
   const handleDownload = () => {
     if (!generatedImageUrl) return;
-    
+
     const link = document.createElement('a');
     link.href = generatedImageUrl;
-    link.download = `cat-avatar-${generationId}.png`;
+    link.download = `pet-id-photo-${generationId || 'generated'}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const handleRegenerate = () => {
-    handleGenerate();
+  const handleReset = () => {
+    setUploadedImageUrl('');
+    setGeneratedImageUrl('');
+    setGenerationId('');
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-pink-50">
-      <div className="container mx-auto px-4 py-8">
-        {/* 头部 */}
-        <div className="text-center mb-12">
-          <h1 className="text-4xl md:text-6xl font-bold text-gray-800 mb-4">
-            🐱 猫咪头像生成器
-          </h1>
-          <p className="text-lg md:text-xl text-gray-600 max-w-2xl mx-auto">
-            上传你家猫咪的照片，AI将为你生成可爱的卡通头像
-          </p>
-        </div>
-
-        {/* 主要内容 */}
-        <div className="max-w-6xl mx-auto">
-          {!uploadedImageUrl ? (
-            // 上传区域
-            <div className="bg-white rounded-2xl shadow-lg p-8">
-              <UploadZone 
-                onFileSelect={handleFileSelect}
-                isUploading={isUploading}
-              />
+    <main className="min-h-screen bg-[#f7f4ee] text-[#1f2320]">
+      <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-5 sm:px-6 lg:px-8">
+        <header className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-[#ded8cd] pb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#1f6f64] text-white">
+              <Sparkles size={20} />
             </div>
-          ) : (
-            // 结果展示
-            <div className="bg-white rounded-2xl shadow-lg p-8">
+            <div>
+              <h1 className="text-xl font-semibold tracking-normal">{t.appName}</h1>
+              <p className="text-sm text-[#6f716a]">{t.tagline}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}
+              className="h-10 rounded-lg border border-[#ded8cd] bg-white px-3 text-sm font-medium text-[#42463f] transition-colors hover:bg-[#f7f4ee]"
+            >
+              {locale === 'en' ? 'ZH' : 'EN'}
+            </button>
+            <div className="hidden items-center gap-2 rounded-lg border border-[#ded8cd] bg-white px-3 py-2 text-sm text-[#575a53] sm:flex">
+              <span className="h-2 w-2 rounded-full bg-[#1f6f64]" />
+              {t.formatBadge}
+            </div>
+          </div>
+        </header>
+
+        <section className="grid flex-1 gap-5 lg:grid-cols-[minmax(0,0.92fr)_minmax(420px,1.08fr)]">
+          <aside className="flex flex-col justify-between rounded-lg border border-[#ded8cd] bg-[#fffdf8] p-5 shadow-sm">
+            <div>
+              <p className="mb-3 text-sm font-medium uppercase text-[#b85c38]">{t.studio}</p>
+              <h2 className="text-3xl font-semibold leading-tight md:text-5xl">{t.hero}</h2>
+              <p className="mt-4 max-w-xl text-base leading-7 text-[#686b63]">{t.description}</p>
+
+              <div className="mt-6 grid grid-cols-2 gap-3">
+                {creditSummary.map((item) => (
+                  <div key={item.label} className="rounded-lg border border-[#e6dfd4] bg-white p-4">
+                    <div className="text-xs uppercase text-[#6f716a]">{item.label}</div>
+                    <div className="mt-2 text-3xl font-semibold text-[#1f2320]">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {!canGenerate && (
+                <div className="mt-4 rounded-lg border border-[#e6dfd4] bg-[#fff7ef] p-4 text-sm text-[#6f4a32]">
+                  <div className="font-medium text-[#1f2320]">{t.contactTitle}</div>
+                  <p className="mt-1 leading-6">{t.contactBody}</p>
+                  <div className="mt-3 flex items-start gap-3 rounded-lg border border-[#ead7c9] bg-white p-3">
+                    <img
+                      src="/wechat-qr.png"
+                      alt={t.contactQrAlt}
+                      className="h-28 w-28 rounded-lg border border-[#e6dfd4] bg-white object-cover"
+                    />
+                    <div className="min-w-0">
+                      <div className="inline-flex items-center gap-2 rounded-lg bg-[#b85c38] px-3 py-2 text-sm font-medium text-white">
+                        <MessageCircle size={16} />
+                        {t.contactButton}
+                      </div>
+                      <p className="mt-2 leading-6 text-[#6f716a]">{t.contactQrHint}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 flex gap-2">
+                <input
+                  value={redeemCode}
+                  onChange={(event) => setRedeemCode(event.target.value)}
+                  placeholder={t.redeemPlaceholder}
+                  className="h-11 min-w-0 flex-1 rounded-lg border border-[#d8d2c8] bg-white px-3 text-sm outline-none focus:border-[#1f6f64]"
+                />
+                <button
+                  onClick={handleRedeem}
+                  disabled={isRedeeming || !redeemCode.trim()}
+                  className="h-11 rounded-lg bg-[#1f6f64] px-4 text-sm font-medium text-white transition-colors hover:bg-[#18584f] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {t.redeemButton}
+                </button>
+              </div>
+              {redeemMessage && <p className="mt-2 text-sm text-[#6f716a]">{redeemMessage}</p>}
+            </div>
+
+            <div className="mt-8 grid gap-3 text-sm text-[#575a53]">
+              <StatusRow active={stage === 'upload'} done={stage !== 'upload'} label={t.uploadStep} />
+              <StatusRow active={stage === 'generating'} done={stage === 'done'} label={t.generateStep} />
+              <StatusRow active={stage === 'done'} done={stage === 'done'} label={t.downloadStep} />
+            </div>
+          </aside>
+
+          <section className="rounded-lg border border-[#ded8cd] bg-white p-4 shadow-sm sm:p-5">
+            {!uploadedImageUrl ? (
+              <UploadZone copy={t} onFileSelect={handleFileSelect} isUploading={isUploading} disabled={!canGenerate} />
+            ) : (
               <GenerationResult
+                copy={t}
                 originalUrl={uploadedImageUrl}
                 generatedUrl={generatedImageUrl}
                 isGenerating={isGenerating}
-                onRegenerate={handleRegenerate}
+                canGenerate={canGenerate}
+                onRegenerate={() => handleGenerate()}
                 onDownload={handleDownload}
+                onReset={handleReset}
               />
-            </div>
-          )}
-        </div>
-
-        {/* 功能介绍 */}
-        <div className="mt-16 text-center">
-          <h2 className="text-2xl font-semibold text-gray-800 mb-8">如何使用</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
-            <div className="bg-white rounded-xl p-6 shadow-md">
-              <div className="text-3xl mb-4">📸</div>
-              <h3 className="text-lg font-semibold mb-2">上传照片</h3>
-              <p className="text-gray-600">选择一张清晰的猫咪照片</p>
-            </div>
-            <div className="bg-white rounded-xl p-6 shadow-md">
-              <div className="text-3xl mb-4">🤖</div>
-              <h3 className="text-lg font-semibold mb-2">AI处理</h3>
-              <p className="text-gray-600">AI自动生成卡通风格头像</p>
-            </div>
-            <div className="bg-white rounded-xl p-6 shadow-md">
-              <div className="text-3xl mb-4">💾</div>
-              <h3 className="text-lg font-semibold mb-2">下载使用</h3>
-              <p className="text-gray-600">下载高质量头像图片</p>
-            </div>
-          </div>
-        </div>
+            )}
+          </section>
+        </section>
       </div>
+    </main>
+  );
+}
+
+function StatusRow({ active, done, label }: { active: boolean; done: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-[#e6dfd4] bg-white px-3 py-3">
+      <span
+        className={`h-3 w-3 rounded-full ${
+          done ? 'bg-[#1f6f64]' : active ? 'bg-[#d8893a]' : 'bg-[#d8d2c8]'
+        }`}
+      />
+      <span className={active ? 'font-medium text-[#1f2320]' : ''}>{label}</span>
     </div>
   );
+}
+
+async function getErrorMessage(response: Response, fallback: string) {
+  try {
+    const contentType = response.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      const data = await response.json();
+      return data.error || data.details || fallback;
+    }
+
+    const text = await response.text();
+    return text || fallback;
+  } catch {
+    return fallback;
+  }
 }

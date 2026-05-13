@@ -1,27 +1,84 @@
+import { mkdir, readFile, writeFile } from 'fs/promises';
+import { join, resolve, sep } from 'path';
 import { NextRequest, NextResponse } from 'next/server';
-import { readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { generateCartoonAvatar as generateSiliconCloudAvatar } from '@/lib/ai/siliconcloud';
+import { generateCartoonAvatarWithAPIMart } from '@/lib/ai/apimart';
+import { generateWithFallback } from '@/lib/ai/alternative';
 import { generateCartoonAvatar as generateHuggingFaceAvatar } from '@/lib/ai/huggingface';
 import { generateMockCartoonAvatar } from '@/lib/ai/mock-generator';
-import { generateWithFallback } from '@/lib/ai/alternative';
+import { generateCartoonAvatar as generateSiliconCloudAvatar } from '@/lib/ai/siliconcloud';
 import { db, isDatabaseConnected } from '@/lib/db';
 import { generations } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+
+function resolveInputImagePath(imageUrl: string) {
+  if (imageUrl.startsWith('/tmp')) {
+    const resolved = resolve(imageUrl);
+    const tempRoot = resolve('/tmp');
+
+    if (resolved !== tempRoot && resolved.startsWith(`${tempRoot}${sep}`)) {
+      return resolved;
+    }
+  }
+
+  if (imageUrl.startsWith('/uploads/')) {
+    return join(process.cwd(), 'public', imageUrl);
+  }
+
+  throw new Error('Unsupported image path');
+}
+
+async function updateGenerationStatus(
+  id: string,
+  values: Partial<typeof generations.$inferInsert>,
+) {
+  if (!isDatabaseConnected()) return;
+
+  try {
+    await db!.update(generations)
+      .set({ ...values, updatedAt: new Date() })
+      .where(eq(generations.id, id));
+  } catch (dbError) {
+    console.warn('Database update failed, continuing:', dbError);
+  }
+}
+
+async function toImageBuffer(generatedImage: Blob | Buffer | string) {
+  if (generatedImage instanceof Blob) {
+    return Buffer.from(await generatedImage.arrayBuffer());
+  }
+
+  if (Buffer.isBuffer(generatedImage)) {
+    return generatedImage;
+  }
+
+  if (generatedImage.startsWith('http')) {
+    const imageResponse = await fetch(generatedImage);
+
+    if (!imageResponse.ok) {
+      throw new Error(`Generated image download failed: ${imageResponse.status}`);
+    }
+
+    return Buffer.from(await imageResponse.arrayBuffer());
+  }
+
+  if (generatedImage.startsWith('data:image')) {
+    return Buffer.from(generatedImage.split(',')[1] || '', 'base64');
+  }
+
+  return Buffer.from(generatedImage, 'base64');
+}
 
 export async function POST(request: NextRequest) {
+  const generationId = uuidv4();
+
   try {
     const { imageUrl, style = 'cartoon' } = await request.json();
 
-    if (!imageUrl) {
-      return NextResponse.json({ error: '缺少图片URL' }, { status: 400 });
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
     }
 
-    // 生成唯一ID
-    const generationId = uuidv4();
-
-    // 在数据库中创建记录（如果数据库可用）
     if (isDatabaseConnected()) {
       try {
         await db!.insert(generations).values({
@@ -31,129 +88,78 @@ export async function POST(request: NextRequest) {
           status: 'processing',
         });
       } catch (dbError) {
-        console.warn('数据库写入失败，继续处理:', dbError);
+        console.warn('Database insert failed, continuing:', dbError);
       }
     }
 
-    try {
-      // 读取原图片文件
-      // 处理绝对路径（Vercel临时文件）和相对路径（本地文件）
-      const imagePath = imageUrl.startsWith('/') && imageUrl.includes('tmp') 
-        ? imageUrl 
-        : join(process.cwd(), 'public', imageUrl);
-      const imageBuffer = await readFile(imagePath);
+    const imagePath = resolveInputImagePath(imageUrl);
+    const imageBuffer = await readFile(imagePath);
+    let generatedImage: Blob | Buffer | string;
 
-      // 调用AI生成卡通头像（多级备用方案）
-      let generatedImage;
+    try {
+      console.log('Trying APIMart API...');
+      generatedImage = await generateCartoonAvatarWithAPIMart(imageBuffer, imagePath, style);
+      console.log('APIMart API succeeded');
+    } catch (apimartError) {
+      console.log('APIMart API failed, trying SiliconCloud:', apimartError);
       try {
-        console.log('尝试SiliconCloud API...');
         generatedImage = await generateSiliconCloudAvatar(imageBuffer, style);
-        console.log('SiliconCloud API成功');
-      } catch (aiError) {
-        console.log('SiliconCloud API失败，尝试Hugging Face API备用方案');
+        console.log('SiliconCloud API succeeded');
+      } catch (siliconCloudError) {
+        console.log('SiliconCloud API failed, trying Hugging Face:', siliconCloudError);
         try {
           generatedImage = await generateHuggingFaceAvatar(imageBuffer, style);
-          console.log('Hugging Face API备用方案成功');
-        } catch (hfError) {
-          console.log('Hugging Face API失败，使用图像处理备用方案');
+          console.log('Hugging Face API succeeded');
+        } catch (huggingFaceError) {
+          console.log('Hugging Face API failed, using local fallback:', huggingFaceError);
           try {
             generatedImage = await generateWithFallback(imageBuffer, style);
-            console.log('图像处理备用方案成功');
           } catch (fallbackError) {
-            console.log('图像处理失败，使用最终备用方案');
+            console.log('Local fallback failed, using final placeholder:', fallbackError);
             generatedImage = await generateMockCartoonAvatar(imageBuffer, style);
           }
         }
       }
-
-      // 将生成的图片保存到本地
-      const generatedFilename = `generated_${generationId}.png`;
-      const isVercel = process.env.VERCEL === '1';
-      
-      // 在Vercel环境直接返回base64，本地开发使用public目录
-      const generatedPath = isVercel 
-        ? null // Vercel环境不保存文件
-        : join(process.cwd(), 'public', 'generated', generatedFilename);
-      
-      console.log('准备保存图片到:', generatedPath);
-      
-      // 处理图片保存和URL生成
-      const finalImageBuffer = generatedImage instanceof Blob 
-        ? Buffer.from(await generatedImage.arrayBuffer())
-        : Buffer.from(generatedImage);
-              console.log('图片buffer大小:', finalImageBuffer.length, 'bytes');
-      
-      let generatedUrl;
-      
-              if (isVercel) {
-          // Vercel环境直接返回base64数据URL
-          const base64 = finalImageBuffer.toString('base64');
-          generatedUrl = `data:image/png;base64,${base64}`;
-          console.log('Vercel环境：使用base64数据URL');
-        } else {
-          // 本地环境保存到文件系统
-          try {
-            await writeFile(generatedPath!, finalImageBuffer);
-            console.log('图片保存成功:', generatedPath);
-          } catch (error) {
-            console.log('目录不存在，创建目录...');
-            const { mkdir } = await import('fs/promises');
-            await mkdir(join(process.cwd(), 'public', 'generated'), { recursive: true });
-            await writeFile(generatedPath!, finalImageBuffer);
-            console.log('图片保存成功 (新建目录):', generatedPath);
-          }
-          generatedUrl = `/generated/${generatedFilename}`;
-        }
-
-      // 更新数据库记录（如果数据库可用）
-      if (isDatabaseConnected()) {
-        try {
-          await db!.update(generations)
-            .set({
-              generatedImageUrl: generatedUrl,
-              status: 'completed',
-              updatedAt: new Date(),
-            })
-            .where(eq(generations.id, generationId));
-        } catch (dbError) {
-          console.warn('数据库更新失败:', dbError);
-        }
-      }
-
-      return NextResponse.json({
-        id: generationId,
-        originalUrl: imageUrl,
-        generatedUrl,
-        style,
-        status: 'completed'
-      });
-
-    } catch (aiError) {
-      console.error('AI生成错误:', aiError);
-      
-      // 更新数据库记录为失败状态（如果数据库可用）
-      if (isDatabaseConnected()) {
-        try {
-          await db!.update(generations)
-            .set({
-              status: 'failed',
-              updatedAt: new Date(),
-            })
-            .where(eq(generations.id, generationId));
-        } catch (dbError) {
-          console.warn('数据库更新失败:', dbError);
-        }
-      }
-
-      return NextResponse.json({ 
-        error: '图片生成失败，请稍后重试',
-        details: process.env.NODE_ENV === 'development' ? String(aiError) : undefined,
-        id: generationId 
-      }, { status: 500 });
     }
 
+    const finalImageBuffer = await toImageBuffer(generatedImage);
+    const isVercel = process.env.VERCEL === '1';
+    const generatedFilename = `generated_${generationId}.png`;
+    let generatedUrl: string;
+
+    if (isVercel) {
+      generatedUrl = `data:image/png;base64,${finalImageBuffer.toString('base64')}`;
+    } else {
+      const generatedDir = join(process.cwd(), 'public', 'generated');
+      const generatedPath = join(generatedDir, generatedFilename);
+      await mkdir(generatedDir, { recursive: true });
+      await writeFile(generatedPath, finalImageBuffer);
+      generatedUrl = `/generated/${generatedFilename}`;
+    }
+
+    await updateGenerationStatus(generationId, {
+      generatedImageUrl: generatedUrl,
+      status: 'completed',
+    });
+
+    return NextResponse.json({
+      id: generationId,
+      originalUrl: imageUrl,
+      generatedUrl,
+      style,
+      status: 'completed',
+    });
   } catch (error) {
-    console.error('生成API错误:', error);
-    return NextResponse.json({ error: '服务器错误' }, { status: 500 });
+    console.error('Generate API error:', error);
+    await updateGenerationStatus(generationId, { status: 'failed' });
+
+    return NextResponse.json(
+      {
+        error: 'Image generation failed, please try again later',
+        details: process.env.NODE_ENV === 'development' ? String(error) : undefined,
+        id: generationId,
+      },
+      { status: 500 },
+    );
   }
 }
