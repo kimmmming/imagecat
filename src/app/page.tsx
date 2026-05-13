@@ -16,6 +16,58 @@ import { GenerationResult } from '@/components/ui/generation-result';
 
 type Stage = 'upload' | 'generating' | 'done';
 
+const MAX_UPLOAD_EDGE = 1400;
+const TARGET_UPLOAD_BYTES = 900 * 1024;
+
+async function prepareImageForUpload(file: File) {
+  if (file.size <= TARGET_UPLOAD_BYTES) {
+    return file;
+  }
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Image compression failed'));
+    };
+    img.src = objectUrl;
+  });
+
+  const scale = Math.min(1, MAX_UPLOAD_EDGE / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    return file;
+  }
+
+  canvas.width = width;
+  canvas.height = height;
+  context.drawImage(image, 0, 0, width, height);
+
+  const qualities = [0.82, 0.72, 0.62];
+
+  for (const quality of qualities) {
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/jpeg', quality);
+    });
+
+    if (blob && (blob.size <= TARGET_UPLOAD_BYTES || quality === qualities[qualities.length - 1])) {
+      return new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' });
+    }
+  }
+
+  return file;
+}
+
 export default function Home() {
   const [locale, setLocale] = useState<Locale>('en');
   const [freeCreditsUsed, setFreeCreditsUsed] = useState(0);
@@ -97,7 +149,8 @@ export default function Home() {
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      const uploadFile = await prepareImageForUpload(file);
+      formData.append('file', uploadFile);
 
       const response = await fetch('/api/upload', {
         method: 'POST',
