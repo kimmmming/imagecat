@@ -16,8 +16,8 @@ import { GenerationResult } from '@/components/ui/generation-result';
 
 type Stage = 'upload' | 'generating' | 'done';
 
-const MAX_UPLOAD_EDGE = 1400;
-const TARGET_UPLOAD_BYTES = 900 * 1024;
+const MAX_UPLOAD_EDGE = 1024;
+const TARGET_UPLOAD_BYTES = 480 * 1024;
 
 async function prepareImageForUpload(file: File) {
   if (file.size <= TARGET_UPLOAD_BYTES) {
@@ -53,7 +53,7 @@ async function prepareImageForUpload(file: File) {
   canvas.height = height;
   context.drawImage(image, 0, 0, width, height);
 
-  const qualities = [0.82, 0.72, 0.62];
+  const qualities = [0.76, 0.66, 0.56];
 
   for (const quality of qualities) {
     const blob = await new Promise<Blob | null>((resolve) => {
@@ -80,6 +80,7 @@ export default function Home() {
   const [generatedImageUrl, setGeneratedImageUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationElapsedSeconds, setGenerationElapsedSeconds] = useState(0);
   const [generationId, setGenerationId] = useState('');
 
   const t = copy[locale];
@@ -116,6 +117,20 @@ export default function Home() {
   useEffect(() => {
     window.localStorage.setItem(LOCALE_KEY, locale);
   }, [locale]);
+
+  useEffect(() => {
+    if (!isGenerating) {
+      setGenerationElapsedSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setGenerationElapsedSeconds(Math.max(1, Math.round((Date.now() - startedAt) / 1000)));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [isGenerating]);
 
   const creditSummary = useMemo(
     () => [
@@ -183,6 +198,7 @@ export default function Home() {
     }
 
     setIsGenerating(true);
+    setGenerationElapsedSeconds(0);
     setGeneratedImageUrl('');
 
     try {
@@ -375,6 +391,7 @@ export default function Home() {
                 originalUrl={uploadedImageUrl}
                 generatedUrl={generatedImageUrl}
                 isGenerating={isGenerating}
+                elapsedSeconds={generationElapsedSeconds}
                 canGenerate={canGenerate}
                 onRegenerate={() => handleGenerate()}
                 onDownload={handleDownload}

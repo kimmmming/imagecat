@@ -8,6 +8,7 @@ interface GenerationResultProps {
   originalUrl: string;
   generatedUrl?: string;
   isGenerating: boolean;
+  elapsedSeconds: number;
   canGenerate: boolean;
   onRegenerate: () => void;
   onDownload: () => void;
@@ -27,6 +28,7 @@ export function GenerationResult({
   originalUrl,
   generatedUrl,
   isGenerating,
+  elapsedSeconds,
   canGenerate,
   onRegenerate,
   onDownload,
@@ -51,6 +53,9 @@ export function GenerationResult({
                 <div className="mx-auto mb-5 h-14 w-14 animate-spin rounded-full border-2 border-[#1f6f64] border-t-transparent" />
                 <p className="font-medium text-[#1f2320]">{copy.generatingTitle}</p>
                 <p className="mt-2 text-sm text-[#6f716a]">{copy.generatingHelp}</p>
+                <p className="mt-3 text-xs text-[#8a877e]">
+                  {copy.elapsedLabel} {elapsedSeconds}s
+                </p>
               </div>
             ) : generatedUrl ? (
               <img
