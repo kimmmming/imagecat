@@ -11,6 +11,8 @@ import { generateCartoonAvatar as generateSiliconCloudAvatar } from '@/lib/ai/si
 import { db, isDatabaseConnected } from '@/lib/db';
 import { generations } from '@/lib/db/schema';
 
+export const maxDuration = 60;
+
 function resolveInputImagePath(imageUrl: string) {
   if (imageUrl.startsWith('/tmp')) {
     const resolved = resolve(imageUrl);
@@ -26,6 +28,35 @@ function resolveInputImagePath(imageUrl: string) {
   }
 
   throw new Error('Unsupported image path');
+}
+
+function loadDataImage(imageUrl: string) {
+  const match = imageUrl.match(/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/);
+
+  if (!match) {
+    throw new Error('Unsupported image data URL');
+  }
+
+  const mimeType = match[1];
+  const extension = mimeType === 'image/jpeg' ? 'jpg' : mimeType.replace('image/', '');
+
+  return {
+    buffer: Buffer.from(match[2], 'base64'),
+    imagePath: `upload.${extension}`,
+  };
+}
+
+async function loadInputImage(imageUrl: string) {
+  if (imageUrl.startsWith('data:image')) {
+    return loadDataImage(imageUrl);
+  }
+
+  const imagePath = resolveInputImagePath(imageUrl);
+
+  return {
+    buffer: await readFile(imagePath),
+    imagePath,
+  };
 }
 
 async function updateGenerationStatus(
@@ -92,8 +123,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const imagePath = resolveInputImagePath(imageUrl);
-    const imageBuffer = await readFile(imagePath);
+    const { buffer: imageBuffer, imagePath } = await loadInputImage(imageUrl);
     let generatedImage: Blob | Buffer | string;
 
     try {

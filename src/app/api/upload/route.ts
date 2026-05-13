@@ -28,6 +28,18 @@ export async function POST(request: NextRequest) {
     const extension = file.name.split('.').pop()?.toLowerCase() || 'png';
     const filename = `${uuidv4()}.${extension}`;
     const isVercel = process.env.VERCEL === '1';
+
+    if (isVercel) {
+      return NextResponse.json({
+        message: 'Upload successful',
+        filename,
+        url: `data:${file.type};base64,${buffer.toString('base64')}`,
+        size: file.size,
+        type: file.type,
+        isTemp: false,
+      });
+    }
+
     const uploadDir = isVercel ? '/tmp' : join(process.cwd(), 'public', 'uploads');
     const filePath = join(uploadDir, filename);
 
