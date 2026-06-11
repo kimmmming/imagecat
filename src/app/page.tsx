@@ -427,8 +427,18 @@ async function getErrorMessage(response: Response, fallback: string) {
       return data.error || data.details || fallback;
     }
 
+    if (contentType.includes('text/html')) {
+      return `${fallback}. The server timed out. Please try again in a moment.`;
+    }
+
     const text = await response.text();
-    return text || fallback;
+    const trimmedText = text.trim();
+
+    if (!trimmedText || trimmedText.startsWith('<!DOCTYPE') || trimmedText.startsWith('<html')) {
+      return `${fallback}. The server timed out. Please try again in a moment.`;
+    }
+
+    return trimmedText || fallback;
   } catch {
     return fallback;
   }

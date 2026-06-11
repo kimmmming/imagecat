@@ -4,7 +4,7 @@ const API_BASE_URL = process.env.APIMART_API_BASE_URL || 'https://api.apimart.ai
 const MODEL = process.env.APIMART_IMAGE_MODEL || 'gpt-image-2';
 const DEFAULT_SIZE = process.env.APIMART_IMAGE_SIZE || '1:1';
 const DEFAULT_RESOLUTION = process.env.APIMART_IMAGE_RESOLUTION || '1k';
-const POLL_ATTEMPTS = Number(process.env.APIMART_POLL_ATTEMPTS || 28);
+const POLL_ATTEMPTS = Number(process.env.APIMART_POLL_ATTEMPTS || 20);
 const POLL_INTERVAL_MS = Number(process.env.APIMART_POLL_INTERVAL_MS || 2000);
 const INITIAL_POLL_DELAY_MS = Number(process.env.APIMART_INITIAL_POLL_DELAY_MS || 2000);
 

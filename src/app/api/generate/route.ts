@@ -13,6 +13,26 @@ import { generations } from '@/lib/db/schema';
 
 export const maxDuration = 60;
 
+const GENERATION_TIMEOUT_MS = Number(process.env.GENERATION_TIMEOUT_MS || 52000);
+
+class GenerationTimeoutError extends Error {
+  constructor() {
+    super('Image generation timed out. Please try again later.');
+    this.name = 'GenerationTimeoutError';
+  }
+}
+
+function withGenerationTimeout<T>(promise: Promise<T>) {
+  return new Promise<T>((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new GenerationTimeoutError()), GENERATION_TIMEOUT_MS);
+
+    promise
+      .then(resolvePromise)
+      .catch(reject)
+      .finally(() => clearTimeout(timer));
+  });
+}
+
 function resolveInputImagePath(imageUrl: string) {
   if (imageUrl.startsWith('/tmp')) {
     const resolved = resolve(imageUrl);
@@ -100,6 +120,40 @@ async function toImageBuffer(generatedImage: Blob | Buffer | string) {
   return Buffer.from(generatedImage, 'base64');
 }
 
+async function generateAvatar(imageBuffer: Buffer, imagePath: string, style: string) {
+  try {
+    console.log('Trying APIMart API...');
+    const generatedImage = await generateCartoonAvatarWithAPIMart(imageBuffer, imagePath, style);
+    console.log('APIMart API succeeded');
+    return generatedImage;
+  } catch (apimartError) {
+    console.log('APIMart API failed, trying SiliconCloud:', apimartError);
+  }
+
+  try {
+    const generatedImage = await generateSiliconCloudAvatar(imageBuffer, style);
+    console.log('SiliconCloud API succeeded');
+    return generatedImage;
+  } catch (siliconCloudError) {
+    console.log('SiliconCloud API failed, trying Hugging Face:', siliconCloudError);
+  }
+
+  try {
+    const generatedImage = await generateHuggingFaceAvatar(imageBuffer, style);
+    console.log('Hugging Face API succeeded');
+    return generatedImage;
+  } catch (huggingFaceError) {
+    console.log('Hugging Face API failed, using local fallback:', huggingFaceError);
+  }
+
+  try {
+    return await generateWithFallback(imageBuffer, style);
+  } catch (fallbackError) {
+    console.log('Local fallback failed, using final placeholder:', fallbackError);
+    return generateMockCartoonAvatar(imageBuffer, style);
+  }
+}
+
 export async function POST(request: NextRequest) {
   const generationId = uuidv4();
 
@@ -124,33 +178,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { buffer: imageBuffer, imagePath } = await loadInputImage(imageUrl);
-    let generatedImage: Blob | Buffer | string;
-
-    try {
-      console.log('Trying APIMart API...');
-      generatedImage = await generateCartoonAvatarWithAPIMart(imageBuffer, imagePath, style);
-      console.log('APIMart API succeeded');
-    } catch (apimartError) {
-      console.log('APIMart API failed, trying SiliconCloud:', apimartError);
-      try {
-        generatedImage = await generateSiliconCloudAvatar(imageBuffer, style);
-        console.log('SiliconCloud API succeeded');
-      } catch (siliconCloudError) {
-        console.log('SiliconCloud API failed, trying Hugging Face:', siliconCloudError);
-        try {
-          generatedImage = await generateHuggingFaceAvatar(imageBuffer, style);
-          console.log('Hugging Face API succeeded');
-        } catch (huggingFaceError) {
-          console.log('Hugging Face API failed, using local fallback:', huggingFaceError);
-          try {
-            generatedImage = await generateWithFallback(imageBuffer, style);
-          } catch (fallbackError) {
-            console.log('Local fallback failed, using final placeholder:', fallbackError);
-            generatedImage = await generateMockCartoonAvatar(imageBuffer, style);
-          }
-        }
-      }
-    }
+    const generatedImage = await withGenerationTimeout(generateAvatar(imageBuffer, imagePath, style));
 
     const finalImageBuffer = await toImageBuffer(generatedImage);
     const isVercel = process.env.VERCEL === '1';
@@ -182,6 +210,16 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Generate API error:', error);
     await updateGenerationStatus(generationId, { status: 'failed' });
+
+    if (error instanceof GenerationTimeoutError) {
+      return NextResponse.json(
+        {
+          error: 'Image generation is taking too long. Please try again in a moment.',
+          id: generationId,
+        },
+        { status: 504 },
+      );
+    }
 
     return NextResponse.json(
       {

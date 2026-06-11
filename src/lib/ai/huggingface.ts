@@ -3,6 +3,10 @@ import { HfInference } from '@huggingface/inference';
 const hf = new HfInference(process.env.HUGGINGFACE_API_TOKEN);
 
 export async function generateCartoonAvatar(_imageBuffer: Buffer, style = 'cartoon') {
+  if (!process.env.HUGGINGFACE_API_TOKEN) {
+    throw new Error('HUGGINGFACE_API_TOKEN is not configured');
+  }
+
   const models = [
     'prompthero/openjourney-v4',
     'runwayml/stable-diffusion-v1-5',
@@ -28,14 +32,18 @@ export async function generateCartoonAvatar(_imageBuffer: Buffer, style = 'carto
 
       return result;
     } catch (modelError) {
-      console.log(`模型 ${model} 调用失败，尝试下一个`, modelError);
+      console.log(`Hugging Face model ${model} failed, trying next model:`, modelError);
     }
   }
 
-  throw new Error('所有 Hugging Face 模型都调用失败');
+  throw new Error('All Hugging Face models failed');
 }
 
 export async function textToImage(prompt: string) {
+  if (!process.env.HUGGINGFACE_API_TOKEN) {
+    throw new Error('HUGGINGFACE_API_TOKEN is not configured');
+  }
+
   try {
     return await hf.textToImage({
       model: 'runwayml/stable-diffusion-v1-5',
@@ -47,7 +55,7 @@ export async function textToImage(prompt: string) {
       },
     });
   } catch (error) {
-    console.error('Hugging Face 文字生成图片错误:', error);
-    throw new Error('图片生成失败');
+    console.error('Hugging Face text-to-image failed:', error);
+    throw new Error('Image generation failed');
   }
 }
