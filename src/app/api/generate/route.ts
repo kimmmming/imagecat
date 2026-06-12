@@ -116,10 +116,10 @@ function detectImageMimeType(buffer: Buffer) {
 async function toImageAsset(generatedImage: Blob | Buffer | string) {
   if (generatedImage instanceof Blob) {
     const buffer = Buffer.from(await generatedImage.arrayBuffer());
-    const mimeType = generatedImage.type.startsWith('image/') ? generatedImage.type : detectImageMimeType(buffer);
+    const mimeType = detectImageMimeType(buffer);
 
     if (!mimeType) {
-      throw new Error('Generated blob is not a supported image');
+      throw new Error(`Generated blob is not a supported image: ${generatedImage.type || 'unknown content type'}`);
     }
 
     return { buffer, mimeType };
@@ -144,7 +144,7 @@ async function toImageAsset(generatedImage: Blob | Buffer | string) {
 
     const buffer = Buffer.from(await imageResponse.arrayBuffer());
     const contentType = imageResponse.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
-    const mimeType = contentType?.startsWith('image/') ? contentType : detectImageMimeType(buffer);
+    const mimeType = detectImageMimeType(buffer);
 
     if (!mimeType) {
       throw new Error(`Generated image URL returned non-image content: ${contentType || 'unknown content type'}`);

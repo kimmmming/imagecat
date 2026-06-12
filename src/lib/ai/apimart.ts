@@ -42,6 +42,40 @@ async function parseApiResponse(response: Response) {
   }
 }
 
+function findImageValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    if (value.startsWith('http') || value.startsWith('data:image')) return value;
+    if (value.length > 200 && /^[A-Za-z0-9+/=]+$/.test(value)) return value;
+    return null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const imageValue = findImageValue(item);
+      if (imageValue) return imageValue;
+    }
+
+    return null;
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const preferredKeys = ['url', 'image_url', 'b64_json', 'base64', 'data', 'images', 'output', 'result'];
+
+    for (const key of preferredKeys) {
+      const imageValue = findImageValue(record[key]);
+      if (imageValue) return imageValue;
+    }
+
+    for (const item of Object.values(record)) {
+      const imageValue = findImageValue(item);
+      if (imageValue) return imageValue;
+    }
+  }
+
+  return null;
+}
+
 export async function generateCartoonAvatarWithAPIMart(
   imageBuffer: Buffer,
   imagePath: string,
@@ -102,13 +136,13 @@ export async function generateCartoonAvatarWithAPIMart(
     const task = statusData.data;
 
     if (task?.status === 'completed') {
-      const imageUrl = task.result?.images?.[0]?.url?.[0];
+      const imageUrl = findImageValue(task.result);
 
       if (!imageUrl) {
-        throw new Error('APIMart completed task did not include an image URL');
+        throw new Error(`APIMart completed task did not include image output: ${JSON.stringify(task.result).slice(0, 500)}`);
       }
 
-      return imageUrl as string;
+      return imageUrl;
     }
 
     if (task?.status === 'failed') {
