@@ -18,6 +18,55 @@ type Stage = 'upload' | 'generating' | 'done';
 
 const MAX_UPLOAD_EDGE = 1024;
 const TARGET_UPLOAD_BYTES = 480 * 1024;
+const STATUS_POLL_INTERVAL_MS = 3000;
+const STATUS_POLL_TIMEOUT_MS = 4 * 60 * 1000;
+const MAX_TRANSIENT_POLL_FAILURES = 4;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollGenerationResult(id: string, taskId: string, failedMessage: string) {
+  const startedAt = Date.now();
+  let transientFailures = 0;
+
+  while (Date.now() - startedAt < STATUS_POLL_TIMEOUT_MS) {
+    await sleep(STATUS_POLL_INTERVAL_MS);
+
+    let data: { status?: string; generatedUrl?: string; error?: string };
+
+    try {
+      const response = await fetch(
+        `/api/generate/status?id=${encodeURIComponent(id)}&taskId=${encodeURIComponent(taskId)}`,
+      );
+      data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || failedMessage);
+      }
+
+      transientFailures = 0;
+    } catch (error) {
+      transientFailures += 1;
+
+      if (transientFailures >= MAX_TRANSIENT_POLL_FAILURES) {
+        throw error instanceof Error ? error : new Error(failedMessage);
+      }
+
+      continue;
+    }
+
+    if (data.status === 'completed' && data.generatedUrl) {
+      return data.generatedUrl;
+    }
+
+    if (data.status === 'failed') {
+      throw new Error(data.error || failedMessage);
+    }
+  }
+
+  throw new Error(failedMessage);
+}
 
 async function prepareImageForUpload(file: File) {
   if (file.size <= TARGET_UPLOAD_BYTES) {
@@ -219,8 +268,18 @@ export default function Home() {
       }
 
       const result = await response.json();
+      let finalGeneratedUrl: string = result.generatedUrl;
+
+      if (result.status === 'processing' && result.taskId) {
+        finalGeneratedUrl = await pollGenerationResult(result.id, result.taskId, t.generationFailed);
+      }
+
+      if (!finalGeneratedUrl) {
+        throw new Error(t.generationFailed);
+      }
+
       setGenerationId(result.id);
-      setGeneratedImageUrl(result.generatedUrl);
+      setGeneratedImageUrl(finalGeneratedUrl);
       consumeCredit();
     } catch (error) {
       console.error('Generation error:', error);

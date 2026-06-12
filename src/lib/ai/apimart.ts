@@ -4,13 +4,6 @@ const API_BASE_URL = process.env.APIMART_API_BASE_URL || 'https://api.apimart.ai
 const MODEL = process.env.APIMART_IMAGE_MODEL || 'gpt-image-2';
 const DEFAULT_SIZE = process.env.APIMART_IMAGE_SIZE || '1:1';
 const DEFAULT_RESOLUTION = process.env.APIMART_IMAGE_RESOLUTION || '1k';
-const POLL_ATTEMPTS = Number(process.env.APIMART_POLL_ATTEMPTS || 20);
-const POLL_INTERVAL_MS = Number(process.env.APIMART_POLL_INTERVAL_MS || 2000);
-const INITIAL_POLL_DELAY_MS = Number(process.env.APIMART_INITIAL_POLL_DELAY_MS || 2000);
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function getImageMimeType(path: string) {
   const ext = extname(path).toLowerCase();
@@ -76,17 +69,18 @@ function findImageValue(value: unknown): string | null {
   return null;
 }
 
-export async function generateCartoonAvatarWithAPIMart(
-  imageBuffer: Buffer,
-  imagePath: string,
-  style = 'cartoon',
-) {
+function requireApiKey() {
   const apiKey = process.env.APIMART_API_KEY;
 
   if (!apiKey) {
     throw new Error('APIMART_API_KEY is not configured');
   }
 
+  return apiKey;
+}
+
+export async function submitAPIMartTask(imageBuffer: Buffer, imagePath: string, style = 'cartoon') {
+  const apiKey = requireApiKey();
   const mimeType = getImageMimeType(imagePath);
   const imageDataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
 
@@ -118,39 +112,47 @@ export async function generateCartoonAvatarWithAPIMart(
     throw new Error('APIMart submit response did not include task_id');
   }
 
-  await sleep(INITIAL_POLL_DELAY_MS);
+  return String(taskId);
+}
 
-  for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
-    const statusResponse = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-    });
+export type APIMartTaskState =
+  | { status: 'processing' }
+  | { status: 'completed'; image: string }
+  | { status: 'failed'; error: string };
 
-    const statusData = await parseApiResponse(statusResponse);
+export async function getAPIMartTaskState(taskId: string): Promise<APIMartTaskState> {
+  const apiKey = requireApiKey();
 
-    if (!statusResponse.ok || statusData.error) {
-      throw new Error(statusData.error?.message || `APIMart task query failed: ${statusResponse.status}`);
-    }
+  const statusResponse = await fetch(`${API_BASE_URL}/v1/tasks/${encodeURIComponent(taskId)}`, {
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  });
 
-    const task = statusData.data;
+  const statusData = await parseApiResponse(statusResponse);
 
-    if (task?.status === 'completed') {
-      const imageUrl = findImageValue(task.result);
-
-      if (!imageUrl) {
-        throw new Error(`APIMart completed task did not include image output: ${JSON.stringify(task.result).slice(0, 500)}`);
-      }
-
-      return imageUrl;
-    }
-
-    if (task?.status === 'failed') {
-      throw new Error(task.error?.message || 'APIMart image generation failed');
-    }
-
-    await sleep(POLL_INTERVAL_MS);
+  if (!statusResponse.ok || statusData.error) {
+    throw new Error(statusData.error?.message || `APIMart task query failed: ${statusResponse.status}`);
   }
 
-  throw new Error('APIMart task polling timed out');
+  const task = statusData.data;
+
+  if (task?.status === 'completed') {
+    const image = findImageValue(task.result);
+
+    if (!image) {
+      return {
+        status: 'failed',
+        error: `APIMart completed task did not include image output: ${JSON.stringify(task.result).slice(0, 500)}`,
+      };
+    }
+
+    return { status: 'completed', image };
+  }
+
+  if (task?.status === 'failed') {
+    return { status: 'failed', error: task.error?.message || 'APIMart image generation failed' };
+  }
+
+  return { status: 'processing' };
 }

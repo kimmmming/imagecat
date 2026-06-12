@@ -3,6 +3,9 @@
     "src/app/api/generate/route.ts": {
       "maxDuration": 60
     },
+    "src/app/api/generate/status/route.ts": {
+      "maxDuration": 30
+    },
     "src/app/api/upload/route.ts": {
       "maxDuration": 30
     }

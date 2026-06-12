@@ -41,7 +41,7 @@ export const copy = {
     generating: 'Generating',
     waiting: 'Waiting',
     generatingTitle: 'Generating portrait',
-    generatingHelp: 'Most portraits finish in about 30-50 seconds. Please keep this page open.',
+    generatingHelp: 'Most portraits finish within 1-2 minutes. Please keep this page open.',
     elapsedLabel: 'Elapsed',
     waitingResult: 'Waiting for a result',
     newPhoto: 'New photo',
@@ -90,7 +90,7 @@ export const copy = {
     waiting: '\u7b49\u5f85\u4e2d',
     generatingTitle: '\u6b63\u5728\u751f\u6210\u5934\u50cf',
     generatingHelp:
-      '\u5927\u591a\u6570\u5934\u50cf\u4f1a\u5728 30-50 \u79d2\u5185\u5b8c\u6210\uff0c\u8bf7\u4fdd\u6301\u9875\u9762\u6253\u5f00\u3002',
+      '\u5927\u591a\u6570\u5934\u50cf\u4f1a\u5728 1-2 \u5206\u949f\u5185\u5b8c\u6210\uff0c\u8bf7\u4fdd\u6301\u9875\u9762\u6253\u5f00\u3002',
     elapsedLabel: '\u5df2\u7b49\u5f85',
     waitingResult: '\u7b49\u5f85\u751f\u6210\u7ed3\u679c',
     newPhoto: '\u6362\u4e00\u5f20',
